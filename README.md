@@ -40,7 +40,7 @@ python3 src/runner.py
 
 ### Heroku
 
-This project is ready to run on [Heroku](https//heroku.com) because of the included `Procfile`.
+This project is ready to run on [Heroku](https://heroku.com) because of the included `Procfile`.
 
 Just push this project to an empty Heroku app and you're good to go!
 
