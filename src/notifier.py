@@ -35,6 +35,7 @@ class TelegramNotifier(Notifier):
             disable_notification=False
         )
 
+
 class MockNotifier(Notifier):
 
     def notify_info(self, text: str) -> None:
@@ -42,3 +43,12 @@ class MockNotifier(Notifier):
 
     def notify_error(self, text: str) -> None:
         print(f"Mock Notifier -- Error: {text}")
+
+
+class EmptyNotifier(Notifier):
+
+    def notify_info(self, text: str) -> None:
+        pass
+
+    def notify_error(self, text: str) -> None:
+        pass

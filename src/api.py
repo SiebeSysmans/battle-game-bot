@@ -1,5 +1,13 @@
-from typing import List
-from models import Resources, Unit, UnitItem
+from typing import List, Dict
+from models import (
+    BattleResult,
+    Entities,
+    Item,
+    Player,
+    Resources,
+    Unit,
+    UnitItem
+)
 from gql import Client, gql
 from gql.transport.aiohttp import AIOHTTPTransport
 from abc import ABC, abstractmethod
@@ -22,23 +30,35 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def recruit_citizen(self, amount) -> None:
+    def recruit_citizen(self, amount: int) -> None:
         pass
 
     @abstractmethod
-    def train_unit(self, unit_id, quantity) -> None:
+    def train_unit(self, unit_id: int, quantity: int) -> None:
         pass
 
     @abstractmethod
-    def untrain_unit(self, unit_id, quantity) -> None:
+    def untrain_unit(self, unit_id: int, quantity: int) -> None:
         pass
 
     @abstractmethod
-    def buy_items(self, items) -> None:
+    def buy_items(self, items: List[Dict[str, int]]) -> None:
         pass
 
     @abstractmethod
-    def get_units(self) -> List[Unit]:
+    def get_entities(self) -> Entities:
+        pass
+
+    @abstractmethod
+    def deposit_to_treasury(self, amount: int) -> None:
+        pass
+
+    @abstractmethod
+    def get_players(self, first: int) -> List[Player]:
+        pass
+
+    @abstractmethod
+    def attack_player(self, id: int) -> BattleResult:
         pass
 
 
@@ -98,7 +118,9 @@ class GraphQLAPI(API):
         def map(response) -> Resources:
             resources = Resources(
                 response["viewerProfile"]["housing"]["citizens"],
-                response["viewerProfile"]["resources"]["gold"]
+                response["viewerProfile"]["resources"]["gold"],
+                response["viewerProfile"]["resources"]["treasury"],
+                response["viewerProfile"]["upgrades"]["treasury"]["current"]["limit"]
             )
             return resources
 
@@ -111,6 +133,14 @@ class GraphQLAPI(API):
                         }
                         resources {
                             gold
+                            treasury
+                        }
+                        upgrades {
+                            treasury {
+                                current {
+                                    limit
+                                }
+                            }
                         }
                     }
                 }
@@ -119,7 +149,7 @@ class GraphQLAPI(API):
         response = self.__client.execute(query)
         return map(response)
 
-    def recruit_citizen(self, amount) -> None:
+    def recruit_citizen(self, amount: int) -> None:
         query = gql(
             """
                 mutation ($input: ActionRecruitCitizens!) {
@@ -137,7 +167,7 @@ class GraphQLAPI(API):
         }
         self.__client.execute(query, variable_values=variables)
 
-    def train_unit(self, unit_id, quantity) -> None:
+    def train_unit(self, unit_id: int, quantity: int) -> None:
         query = gql(
             """
                 mutation ($input: ActionTrainUnitInput!) {
@@ -155,7 +185,7 @@ class GraphQLAPI(API):
         }
         self.__client.execute(query, variable_values=variables)
 
-    def untrain_unit(self, unit_id, quantity) -> None:
+    def untrain_unit(self, unit_id: int, quantity: int) -> None:
         query = gql(
             """
                 mutation ($input: ActionUntrainUnitInput!) {
@@ -173,7 +203,7 @@ class GraphQLAPI(API):
         }
         self.__client.execute(query, variable_values=variables)
 
-    def buy_items(self, items) -> None:
+    def buy_items(self, items: List[Dict[str, int]]) -> None:
         query = gql(
             """
                 mutation ($input: ActionBuyItemsInput!) {
@@ -196,10 +226,11 @@ class GraphQLAPI(API):
         }
         self.__client.execute(query, variable_values=variables)
 
-    def get_units(self) -> List[Unit]:
+    def get_entities(self) -> Entities:
 
-        def map(response) -> List[Unit]:
+        def map(response) -> Entities:
             units: List[Unit] = []
+            items: List[Item] = []
             response_buildings = response["buildings"]["data"]
             for response_building in response_buildings:
                 response_units = response_building["units"]
@@ -221,7 +252,15 @@ class GraphQLAPI(API):
                         unit_items
                     )
                     units.append(unit)
-            return units
+                response_items = response_building["items"]
+                for response_item in response_items:
+                    item = Item(
+                        response_item["id"],
+                        response_item["name"],
+                        response_item["price"]
+                    )
+                    items.append(item)
+            return Entities(units, items)
 
         query = gql(
             """
@@ -232,6 +271,9 @@ class GraphQLAPI(API):
                         main_type
                         units {
                             ...Unit
+                        }
+                        items {
+                            ...Item
                         }
                     }
                 }
@@ -265,6 +307,84 @@ class GraphQLAPI(API):
         response = self.__client.execute(query)
         return map(response)
 
+    def deposit_to_treasury(self, amount: int) -> None:
+        query = gql(
+            """
+                mutation ($input: ActionTreasuryTransferInput!) {
+                    actionTreasuryDeposit(input: $input) {
+                        id
+                    }
+                }
+            """
+        )
+        variables = {
+            "input": {
+                "amount": amount
+            }
+        }
+        self.__client.execute(query, variable_values=variables)
+
+    def get_players(self, first: int) -> List[Player]:
+
+        def map(response) -> List[Player]:
+            response_players = response["profiles"]["data"]
+            players: List = []
+            for response_player in response_players:
+                players.append(
+                    Player(
+                        response_player["id"],
+                        response_player["username"],
+                        response_player["resources"]["gold"]
+                    )
+                )
+            return players
+
+        query = gql(
+            """
+                query ($first: Int!) {
+                    profiles(first: $first) {
+                        data {
+                            id
+                            username
+                            resources {
+                                gold
+                            }
+                        }
+                    }
+                }
+            """
+        )
+        variables = {
+            "first": first
+        }
+        response = self.__client.execute(query, variable_values=variables)
+        return map(response)
+
+    def attack_player(self, id: int) -> BattleResult:
+
+        def map(response) -> BattleResult:
+            result = response["actionBattle"]["result"]
+            gold_stolen = response["actionBattle"]["gold_stolen"]
+            return BattleResult(result, gold_stolen)
+
+        query = gql(
+            """
+                mutation($input: ActionBattleInput!) {
+                    actionBattle(input: $input) {
+                        result
+                        gold_stolen
+                    }
+                }
+            """
+        )
+        variables = {
+            "input": {
+                "id": id
+            }
+        }
+        response = self.__client.execute(query, variable_values=variables)
+        return map(response)
+
 
 class MockAPI(ABC):
 
@@ -274,38 +394,60 @@ class MockAPI(ABC):
 
     def get_citizen_prize(self) -> int:
         print(f"Mock API -- Getting citizen prize...")
-        return 100000
+        return 100_000
 
     def get_profile_resources(self) -> Resources:
         print(f"Mock API -- Getting profile resources...")
-        return Resources(10, 9500000)
+        return Resources(5, 100_000, 80_000, 100_000)
 
-    def recruit_citizen(self, amount) -> None:
+    def recruit_citizen(self, amount: int) -> None:
         print(f"Mock API -- Recruiting {amount} citizens...")
 
-    def train_unit(self, unit_id, quantity) -> None:
+    def train_unit(self, unit_id: int, quantity: int) -> None:
         print(
             f"Mock API -- Training {quantity} units with ID = {unit_id}...")
 
-    def untrain_unit(self, unit_id, quantity) -> None:
+    def untrain_unit(self, unit_id: int, quantity: int) -> None:
         print(
             f"Mock API -- Untraining {quantity} units with ID = {unit_id}...")
 
-    def buy_items(self, items) -> None:
+    def buy_items(self, items: List[Dict[str, int]]) -> None:
         print(f"Mock API -- Buying items... {items}")
 
-    def get_units(self) -> List[Unit]:
+    def get_entities(self) -> Entities:
         print(f"Mock API -- Getting units...")
         units: List[Unit] = [
             Unit(0, "Unit 0", 10, [
-                UnitItem(0, "Item 0", 1000, 1),
-                UnitItem(1, "Item 1", 2000, 2)
+                UnitItem(0, "Item 0", 1_000, 1),
+                UnitItem(1, "Item 1", 2_000, 2)
             ]),
             Unit(1, "Unit 1", 20, [
-                UnitItem(2, "Item 2", 3000, 1)
+                UnitItem(2, "Item 2", 3_000, 1)
             ]),
             Unit(2, "Unit 2", 40, [
-                UnitItem(0, "Item 0", 1000, 1)
+                UnitItem(0, "Item 0", 1_000, 1)
             ]),
+            Unit(3, "Unit 3", 30, [])
         ]
-        return units
+        items: List[Item] = [
+            Item(0, "Item 0", 1_000),
+            Item(1, "Item 1", 2_000),
+            Item(2, "Item 2", 3_000)
+        ]
+        return Entities(units, items)
+
+    def deposit_to_treasury(self, amount: int) -> None:
+        print(f"Mock API -- Depositing {amount} gold to treasury...")
+
+    def get_players(self, first: int) -> List[Player]:
+        print(f"Mock API -- Getting players...")
+        players: List[Player] = [
+            Player(0, "Player 0", 100_000),
+            Player(1, "Player 1", 200_000),
+            Player(2, "Player 2", None)
+        ]
+        return players
+
+    def attack_player(self, id: int) -> BattleResult:
+        print(f"Mock API -- Attack player with id {id}...")
+        return BattleResult("Success", 50_000)

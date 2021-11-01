@@ -1,42 +1,66 @@
-from api import GraphQLAPI
-from bot import Bot
-from schedule import repeat, every, idle_seconds, run_pending
-from dotenv import load_dotenv
-from value_store import PostgreSQLValueStore
-from notifier import TelegramNotifier
-import time
-
-load_dotenv()
-
-notifier = TelegramNotifier()
-value_store = PostgreSQLValueStore(notifier)
-api = GraphQLAPI(value_store)
-bot = Bot(api, notifier)
+from strategy import (
+    Strategy,
+    SkipGoldRelativeToPlayersStrategy,
+    DepositMaxGoldInTreasuryStrategy,
+    TrainMaxUnitStrategy
+)
+from typing import List
+from action import Action
+from executor import SimpleActionExecutor
+from notifier import Notifier
+from api import API
+import random
 
 
-@repeat(every().hour.at("00:20"))
-@repeat(every().hour.at("30:20"))
-def auto_convert_units_job() -> None:
-    try:
-        bot.convert_units(
-            from_name="Slinger",
-            to_names=["Sword Fighter", "Crossbowman"]
-        )
-    except Exception as e:
-        print(f"Unexpected job error: {e}")
-        notifier.notify_error(f"Unexpected job error: {e}")
+class StrategyRunner:
 
+    def __init__(self, api: API, executor: SimpleActionExecutor, notifier: Notifier) -> None:
+        self.__api = api
+        self.__executor = executor
+        self.__notifier = notifier
 
-def main() -> None:
-    while True:
-        time_to_sleep = idle_seconds()
-        if time_to_sleep is None:
-            break
-        elif time_to_sleep > 0:
-            print(f"Sleeping for {time_to_sleep} seconds...")
-            time.sleep(time_to_sleep)
-        run_pending()
+    def __run_strategies(self, strategies: List[Strategy]) -> None:
+        # Get resources
+        entities = self.__api.get_entities()
+        resources = self.__api.get_profile_resources()
+        players = self.__api.get_players(50)
 
+        # Build actions
+        actions: List[Action] = []
+        logs: List[str] = []
 
-if __name__ == "__main__":
-    main()
+        for strategy in strategies:
+            strategy_plan = strategy.plan(entities, resources, players)
+            actions.extend(strategy_plan.actions)
+            resources.adjust(
+                strategy_plan.adjusted_resources.citizens,
+                strategy_plan.adjusted_resources.gold,
+                strategy_plan.adjusted_resources.treasury
+            )
+            logs.extend(strategy_plan.logs)
+
+        # Execute
+        self.__executor.execute(actions)
+
+        # Report
+        rapport = ""
+        for log in logs:
+            rapport += log
+            rapport += "\n"
+        rapport += f"Job ran successfully!"
+        print(rapport)
+        self.__notifier.notify_info(rapport)
+
+    def run_main_strategies(self) -> None:
+        # Refresh token
+        new_token = self.__api.refresh_token()
+        print(f"New token: {new_token}")
+
+        # Plan
+        strategies: List[Strategy] = [
+            SkipGoldRelativeToPlayersStrategy(50),
+            TrainMaxUnitStrategy("Slinger"),
+            DepositMaxGoldInTreasuryStrategy()
+        ]
+
+        self.__run_strategies(strategies)

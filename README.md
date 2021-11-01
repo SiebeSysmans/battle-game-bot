@@ -9,6 +9,7 @@ The name of the game has been omitted to not allow further disruption post-launc
 - Automatically buy items
 - Automatically create and train units
 - Automatically convert units to another type
+- Automatically attack players
 - Post job results to a Telegram chat
 
 ## Requirements
@@ -35,14 +36,17 @@ pip3 install -r requirements.txt
 Then run the app with python.
 
 ```bash
-python3 src/runner.py
+python3 src/worker.py
 ```
 
 ### Heroku
 
 This project is ready to run on [Heroku](https://heroku.com) because of the included `Procfile`.
 
-Just push this project to an empty Heroku app and you're good to go!
+- Create a new heroku app.
+- Add the [Heroku Postgres add-on](https://elements.heroku.com/addons/heroku-postgresql) to your app.
+- Add the required environment variables in the settings.
+- Finally, just push this project to the Heroku app and you're good to go!
 
 ## License
 
